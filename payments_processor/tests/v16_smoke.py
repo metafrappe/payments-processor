@@ -144,6 +144,7 @@ def check_disabled_installation():
 
 
 def make_fixtures():
+    bootstrap_accounting_masters()
     suffix = frappe.generate_hash(length=8)
     today = getdate()
     company = frappe.get_doc(
@@ -184,6 +185,16 @@ def make_fixtures():
             "item_group": "All Item Groups",
             "stock_uom": "Nos",
             "is_stock_item": 0,
+        }
+    ).insert()
+    price_list = frappe.get_doc(
+        {
+            "doctype": "Price List",
+            "price_list_name": f"Payment Buying {suffix}",
+            "currency": "USD",
+            "enabled": 1,
+            "buying": 1,
+            "selling": 0,
         }
     ).insert()
     bank = frappe.get_doc(
@@ -236,6 +247,9 @@ def make_fixtures():
                 "bill_date": today,
                 "currency": "USD",
                 "conversion_rate": 1,
+                "buying_price_list": price_list.name,
+                "price_list_currency": "USD",
+                "plc_conversion_rate": 1,
                 "credit_to": company.default_payable_account,
                 "cost_center": company.cost_center,
                 "payment_terms_template": template.name,
@@ -253,3 +267,50 @@ def make_fixtures():
         invoice.submit()
         invoices.append(invoice)
     return company, supplier, bank_account, invoices
+
+
+def bootstrap_accounting_masters():
+    """Seed the wizard prerequisites inside the caller's rollback savepoint.
+
+    A fresh install-app site has not run ERPNext's setup wizard. Reuse its
+    canonical records for company warehouses, groups, party accounts and cash
+    payment mode, plus its UOM data and purchase-document defaults.
+    """
+    from erpnext.setup.setup_wizard.operations.install_fixtures import (
+        add_uom_data,
+        get_preset_records,
+        update_buying_defaults,
+    )
+    from frappe.desk.page.setup_wizard.setup_wizard import make_records
+
+    doctypes = {
+        "Item Group",
+        "Supplier Group",
+        "Warehouse Type",
+        "Party Type",
+        "Mode of Payment",
+    }
+    records = [
+        record
+        for record in get_preset_records("United States")
+        if record["doctype"] in doctypes
+    ]
+    # The wizard normally logs and continues on insertion errors. The smoke
+    # suite must fail immediately if a required prerequisite cannot be made.
+    with patch.object(frappe, "log_error", side_effect=raise_logged_error):
+        make_records(records)
+    add_uom_data()
+    update_buying_defaults()
+    for doctype, name in (
+        ("Country", "United States"),
+        ("Currency", "USD"),
+        ("Warehouse Type", "Transit"),
+        ("Item Group", "All Item Groups"),
+        ("Supplier Group", "All Supplier Groups"),
+        ("UOM", "Nos"),
+        ("Party Type", "Supplier"),
+        ("Mode of Payment", "Cash"),
+    ):
+        assert frappe.db.exists(doctype, name), (
+            f"Missing fixture prerequisite: {doctype} {name}"
+        )
