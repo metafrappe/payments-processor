@@ -46,10 +46,13 @@ bench --site test-site execute payments_processor.tests.v16_smoke.run
 bench --site test-site run-tests --app payments_processor
 ```
 
-The smoke suite creates temporary company, supplier, invoice, and draft payment
-records inside a savepoint, verifies a second run cannot duplicate drafts, checks
-ERPNext's own payment factory and discount balancing, blocks external HTTP, and
-rolls back its fixtures. It expects no enabled Payments Processor configuration.
+The smoke suite prepares and retains a reusable company and standard setup data
+on the disposable site before opening its savepoint: first-company regional schema
+changes implicitly commit in MariaDB. It then creates temporary supplier, invoice,
+and draft payment records, verifies a second run cannot duplicate drafts, checks
+ERPNext's own payment factory and discount balancing, and blocks external HTTP.
+Business fixtures are rolled back and table counts are verified against the baseline.
+It expects no enabled Payments Processor configuration.
 It does not submit a Payment Entry or contact a payment provider.
 
 ## ✨ Features

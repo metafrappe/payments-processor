@@ -21,6 +21,8 @@ def run(app="payments_processor"):
     if not result.wasSuccessful():
         # Keep independent controller checks running to report both failures.
         print(output.getvalue())
+    else:
+        print(f"Payments Processor: {result.testsRun} unit tests passed", flush=True)
 
     # Refuse all outbound HTTP even if another installed app has a document hook.
     with patch(
@@ -28,11 +30,11 @@ def run(app="payments_processor"):
         side_effect=AssertionError("External HTTP forbidden"),
     ) as network:
         check_disabled_installation()
+        company = prepare_accounting_baseline()
+        before_counts = business_record_counts()
         frappe.db.savepoint("payments_processor_smoke")
-        company_name = None
         try:
-            company, supplier, bank_account, invoices = make_fixtures()
-            company_name = company.name
+            company, supplier, bank_account, invoices = make_fixtures(company)
             settings = frappe._dict(
                 company=company.name,
                 bank_account=bank_account.name,
@@ -65,6 +67,10 @@ def run(app="payments_processor"):
                 invoice.name for invoice in invoices
             }
             assert all(row.payment_term for row in payment.references)
+            print(
+                "Payments Processor: grouped 200 USD draft and term references passed",
+                flush=True,
+            )
 
             # Actual v16 child join and aggregate: no duplicate draft on the next pass.
             repeated = PaymentsProcessor(settings).process_invoices()
@@ -85,6 +91,10 @@ def run(app="payments_processor"):
             )
             assert native.paid_to == payment.paid_to
             assert native.payment_type == payment.payment_type
+            print(
+                "Payments Processor: duplicate prevention and ERPNext factory contract passed",
+                flush=True,
+            )
 
             # Discount must still balance after real v16 controller validation.
             payment.delete()
@@ -99,12 +109,19 @@ def run(app="payments_processor"):
             assert discount_payment.paid_amount == 190
             assert discount_payment.deductions[0].amount == -10
             network.assert_not_called()
+            print(
+                "Payments Processor: discounted 190 USD draft balanced; all accounting assertions passed",
+                flush=True,
+            )
         finally:
             frappe.db.rollback(save_point="payments_processor_smoke")
-            if company_name:
-                frappe.clear_document_cache("Company", company_name)
+            frappe.clear_document_cache("Company", company.name)
             frappe.clear_cache()
             frappe.cache.delete_value("fiscal_years")
+        assert business_record_counts() == before_counts, (
+            "Business fixtures were not fully rolled back"
+        )
+        print("Payments Processor: business fixture rollback verified", flush=True)
     if not result.wasSuccessful():
         raise AssertionError(output.getvalue())
     return {
@@ -114,7 +131,7 @@ def run(app="payments_processor"):
         "draft_total": 200,
         "discount_draft_total": 190,
         "external_http_calls": 0,
-        "fixtures": "rolled back",
+        "fixtures": "business records rolled back; reusable disposable-site baseline retained",
     }
 
 
@@ -143,32 +160,76 @@ def check_disabled_installation():
         process.assert_not_called()
 
 
-def make_fixtures():
+def prepare_accounting_baseline():
+    """Keep wizard/Company schema setup outside the business rollback boundary.
+
+    A first US Company creates regional Custom Fields using ALTER TABLE, which
+    implicitly commits in MariaDB. Retain one baseline company on this disposable
+    test site and reuse it after migration; never hide or suppress those commits.
+    """
     bootstrap_accounting_masters()
+    company_name = "Payments Processor CI Baseline"
+    if frappe.db.exists("Company", company_name):
+        company = frappe.get_doc("Company", company_name)
+    else:
+        company = frappe.get_doc(
+            {
+                "doctype": "Company",
+                "company_name": company_name,
+                "abbr": "PPCI",
+                "country": "United States",
+                "default_currency": "USD",
+                "chart_of_accounts": "Standard",
+            }
+        ).insert()
+        company.reload()
+    assert company.default_currency == "USD"
+    if company.default_discount_account != company.default_expense_account:
+        company.default_discount_account = company.default_expense_account
+        company.save()
+    today = getdate()
+    fiscal_year = f"Payments Processor CI {today.year}"
+    if not frappe.db.exists("Fiscal Year", fiscal_year):
+        frappe.get_doc(
+            {
+                "doctype": "Fiscal Year",
+                "year": fiscal_year,
+                "year_start_date": today.replace(month=1, day=1),
+                "year_end_date": today.replace(month=12, day=31),
+                "companies": [{"company": company.name}],
+            }
+        ).insert()
+    frappe.db.commit()
+    print("Payments Processor: reusable accounting baseline committed", flush=True)
+    return company
+
+
+def business_record_counts():
+    return {
+        doctype: frappe.db.count(doctype)
+        for doctype in (
+            "Company",
+            "Fiscal Year",
+            "Account",
+            "Cost Center",
+            "Supplier",
+            "Item",
+            "Bank",
+            "Bank Account",
+            "Price List",
+            "Payment Term",
+            "Payment Terms Template",
+            "Purchase Invoice",
+            "Payment Entry",
+            "GL Entry",
+            "Payment Ledger Entry",
+        )
+    }
+
+
+def make_fixtures(company):
     suffix = frappe.generate_hash(length=8)
     today = getdate()
-    company = frappe.get_doc(
-        {
-            "doctype": "Company",
-            "company_name": f"Payment Test {suffix}",
-            "abbr": f"P{suffix}",
-            "country": "United States",
-            "default_currency": "USD",
-            "chart_of_accounts": "Standard",
-        }
-    ).insert()
-    company.reload()
-    company.default_discount_account = company.default_expense_account
-    company.save()
-    frappe.get_doc(
-        {
-            "doctype": "Fiscal Year",
-            "year": f"Payment FY {suffix}",
-            "year_start_date": today.replace(month=1, day=1),
-            "year_end_date": today.replace(month=12, day=31),
-            "companies": [{"company": company.name}],
-        }
-    ).insert()
     supplier = frappe.get_doc(
         {
             "doctype": "Supplier",
@@ -270,7 +331,7 @@ def make_fixtures():
 
 
 def bootstrap_accounting_masters():
-    """Seed the wizard prerequisites inside the caller's rollback savepoint.
+    """Prepare the reusable setup-wizard baseline on the disposable test site.
 
     A fresh install-app site has not run ERPNext's setup wizard. Reuse its
     canonical records for company warehouses, groups, party accounts and cash
