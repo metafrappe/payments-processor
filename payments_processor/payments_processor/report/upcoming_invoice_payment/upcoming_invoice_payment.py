@@ -9,6 +9,9 @@ from payments_processor.payments_processor.utils.automation import PaymentsProce
 
 
 def execute(filters: dict | None = None):
+    filters = frappe._dict(filters or {})
+    if not filters.company:
+        frappe.throw(_("Please select a company"))
     columns = get_columns()
     data = get_data(filters)
 
@@ -80,8 +83,8 @@ def get_data(filters) -> list[list]:
     """
     auto_pay_settings = frappe.get_all(
         CONFIGURATION_DOCTYPE,
-        "*",
-        {
+        fields=["*"],
+        filters={
             "disabled": 0,
             "company": filters.get("company"),
         },

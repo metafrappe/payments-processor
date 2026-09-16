@@ -4,6 +4,7 @@ app_publisher = "Resilient Tech"
 app_description = "Automates the creation of Payment Entries and handles payments."
 app_email = "info@resilient.tech"
 app_license = "GNU General Public License (v3)"
+required_apps = ["erpnext"]
 
 after_install = "payments_processor.install.after_install"
 before_uninstall = "payments_processor.uninstall.before_uninstall"

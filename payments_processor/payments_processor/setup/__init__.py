@@ -180,7 +180,7 @@ def make_email_templates(email_templates: list[dict]):
     """
     for email_template in email_templates:
         if frappe.db.exists("Email Template", email_template["name"]):
-            doc = frappe.get_doc("Email Template", email_template.pop("name"))
+            doc = frappe.get_doc("Email Template", email_template["name"])
 
         else:
             doc = frappe.new_doc("Email Template")
@@ -312,7 +312,7 @@ def remove_permissions(roles: list[dict]):
     """
     for role in roles:
         try:
-            doctype, role_name, permlevels, permissions = role.values()
+            doctype, role_name, permlevels, _permissions = role.values()
             if isinstance(permlevels, int):
                 permlevels = [permlevels]
 

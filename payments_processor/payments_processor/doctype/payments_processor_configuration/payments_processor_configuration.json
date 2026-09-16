@@ -163,7 +163,7 @@
    "unique": 1
   },
   {
-   "default": "0",
+   "default": "1",
    "fieldname": "disabled",
    "fieldtype": "Check",
    "label": "Disabled"
