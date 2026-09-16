@@ -73,7 +73,10 @@ class TestPaymentDecisions(TestCase):
         pe = MagicMock(name="draft")
         pe.name = "PE-1"
         self.processor.create_payment_entry = MagicMock(return_value=pe)
-        with patch.object(frappe, "db"), patch.object(frappe, "flags", frappe._dict()):
+        with (
+            patch.object(frappe, "db", new_callable=MagicMock),
+            patch.object(frappe, "flags", frappe._dict()),
+        ):
             self.processor.create_payments()
             self.assertIsNone(frappe.flags.initiated_by_payment_processor)
         self.processor.create_payment_entry.assert_called_once_with(
@@ -87,7 +90,10 @@ class TestPaymentDecisions(TestCase):
         self.process(self.invoice(auto_submit=1), self.invoice("PI-2", auto_submit=0))
         pe = MagicMock()
         self.processor.create_payment_entry = MagicMock(return_value=pe)
-        with patch.object(frappe, "db"), patch.object(frappe, "flags", frappe._dict()):
+        with (
+            patch.object(frappe, "db", new_callable=MagicMock),
+            patch.object(frappe, "flags", frappe._dict()),
+        ):
             self.processor.create_payments()
         pe.submit.assert_not_called()
 
@@ -100,7 +106,7 @@ class TestPaymentDecisions(TestCase):
         saved.name = "PE-2"
         self.processor.create_payment_entry = MagicMock(side_effect=[failed, saved])
         with (
-            patch.object(frappe, "db") as db,
+            patch.object(frappe, "db", new_callable=MagicMock) as db,
             patch.object(frappe, "log_error"),
             patch.object(frappe, "get_traceback", return_value="mock failure"),
             patch.object(
@@ -249,7 +255,9 @@ class TestPaymentDecisions(TestCase):
         for name in ["join", "on", "left_join", "select", "where", "orderby"]:
             getattr(query, name).return_value = query
         query.run.return_value = [row]
-        with patch.object(frappe, "qb") as qb:
+        # Frappe v16 exposes qb through LocalProxy, which Mock can infer as
+        # awaitable. Database queries here are synchronous.
+        with patch.object(frappe, "qb", new_callable=MagicMock) as qb:
             qb.from_.return_value = query
             self.processor.get_invoices()
         self.assertEqual(self.processor.invoices["PI-1"].total_outstanding_due, 60)

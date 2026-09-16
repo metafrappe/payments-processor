@@ -19,7 +19,8 @@ def run(app="payments_processor"):
     output = io.StringIO()
     result = unittest.TextTestRunner(stream=output, verbosity=2).run(suite)
     if not result.wasSuccessful():
-        raise AssertionError(output.getvalue())
+        # Keep independent controller checks running to report both failures.
+        print(output.getvalue())
 
     # Refuse all outbound HTTP even if another installed app has a document hook.
     with patch(
@@ -104,6 +105,8 @@ def run(app="payments_processor"):
                 frappe.clear_document_cache("Company", company_name)
             frappe.clear_cache()
             frappe.cache.delete_value("fiscal_years")
+    if not result.wasSuccessful():
+        raise AssertionError(output.getvalue())
     return {
         "app": app,
         "unit_tests": result.testsRun,
