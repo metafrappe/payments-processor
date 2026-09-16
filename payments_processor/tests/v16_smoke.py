@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import frappe
-from frappe.utils import add_days, getdate
+from frappe.utils import getdate
 
 from payments_processor.payments_processor.utils.automation import PaymentsProcessor
 from payments_processor.tests import test_automation
@@ -48,7 +48,8 @@ def run(app="payments_processor"):
             processor = PaymentsProcessor(settings)
             processed = processor.process_invoices()
             assert len(processed.valid[supplier.name]) == 2, processed
-            processor.create_payments()
+            with patch.object(frappe, "log_error", side_effect=raise_logged_error):
+                processor.create_payments()
             entries = {
                 invoice.payment_entry for invoice in processed.valid[supplier.name]
             }
@@ -101,6 +102,8 @@ def run(app="payments_processor"):
             frappe.db.rollback(save_point="payments_processor_smoke")
             if company_name:
                 frappe.clear_document_cache("Company", company_name)
+            frappe.clear_cache()
+            frappe.cache.delete_value("fiscal_years")
     return {
         "app": app,
         "unit_tests": result.testsRun,
@@ -110,6 +113,10 @@ def run(app="payments_processor"):
         "external_http_calls": 0,
         "fixtures": "rolled back",
     }
+
+
+def raise_logged_error(title=None, message=None, **kwargs):
+    raise AssertionError(f"{title}\n{message}")
 
 
 def check_disabled_installation():
