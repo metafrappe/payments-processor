@@ -344,18 +344,23 @@ def bootstrap_accounting_masters():
     )
     from frappe.desk.page.setup_wizard.setup_wizard import make_records
 
-    doctypes = {
-        "Item Group",
-        "Supplier Group",
-        "Warehouse Type",
-        "Party Type",
-        "Mode of Payment",
+    name_fields = {
+        "Item Group": "item_group_name",
+        "Supplier Group": "supplier_group_name",
+        "Warehouse Type": "name",
+        "Party Type": "party_type",
+        "Mode of Payment": "mode_of_payment",
     }
-    records = [
-        record
-        for record in get_preset_records("United States")
-        if record["doctype"] in doctypes
-    ]
+    records = []
+    for record in get_preset_records("United States"):
+        doctype = record["doctype"]
+        if doctype not in name_fields:
+            continue
+        name = record.get("name") or record[name_fields[doctype]]
+        # ignore_if_duplicate still runs NestedSet.on_update on an attempted
+        # insert. Skip existing records before the wizard can mutate their tree.
+        if not frappe.db.exists(doctype, name):
+            records.append(record)
     # The wizard normally logs and continues on insertion errors. The smoke
     # suite must fail immediately if a required prerequisite cannot be made.
     with patch.object(frappe, "log_error", side_effect=raise_logged_error):
